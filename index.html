@@ -5202,8 +5202,9 @@
             }
         }
 
-        function openKasEditorFromProfile() {
+        async function openKasEditorFromProfile() {
             if (!isCurrentUserBendahara()) return;
+            if (!isBendaharaEdit && !(await QOWSYNC.gate('bendahara'))) return;
             closeMemberProfileModal();
             switchSection('kas');
             isBendaharaEdit = true;
@@ -5410,7 +5411,7 @@
             ctx.drawImage(rawSourceImage, drawX, drawY, drawW, drawH);
             ctx.restore();
 
-            tempUploadedPhotoDataUrl = canvas.toDataURL('image/jpeg', 0.9);
+            tempUploadedPhotoDataUrl = canvas.toDataURL('image/jpeg', 0.75);
             const previewContainer = document.getElementById('editAvatarPreviewContainer');
             if (previewContainer) {
                 previewContainer.innerHTML = `<img src="${tempUploadedPhotoDataUrl}" alt="Preview" class="w-full h-full object-cover">`;
@@ -6640,11 +6641,12 @@
             }
         }
 
-        function toggleBendaharaEditMode() {
+        async function toggleBendaharaEditMode() {
             if (!isCurrentUserBendahara()) {
                 showToast("Privasi Kelas: Hanya Bendahara (Nandang & Syahirul Alim) yang dapat membuka Halaman Khusus Bendahara.", "error");
                 return;
             }
+            if (!isBendaharaEdit && !(await QOWSYNC.gate('bendahara'))) return;
             isBendaharaEdit = !isBendaharaEdit;
             const benPanel = document.getElementById('bendaharaExclusivePanel');
             if (benPanel) {
@@ -8071,11 +8073,12 @@
 <!-- ===== SINKRONISASI FIREBASE (QOWSYNC) ===== -->
 <script>
 (function () {
-  // ISI BAGIAN INI dari Firebase Console > Project settings > Your apps (Web)
   const cfg = { apiKey: 'AIzaSyDDMrMhED41-9A3UhozBbqe6Ec6X4VrRjQ', authDomain: 'qowwamoon.firebaseapp.com', projectId: 'qowwamoon', appId: '1:23930847825:web:10dab6b4e225e9fc07ae70' };
   const ON = !!cfg.projectId;
-  const EM = { pengurus: 'pengurus@qowwamoon.app', masul: 'masul@qowwamoon.app' };
+  const EM = { pengurus: 'pengurus@qowwamoon.app', masul: 'masul@qowwamoon.app', bendahara: 'bendahara@qowwamoon.app' };
   const STU = 'qow_students_2027_v1';
+  const KASF = /^((y28_)?m\d+|jan|feb|mar|apr)$/;
+  const KASK = k => /^qow_(expenses|prev_year_income)/.test(k);
   const RAW = new Set(['qow_mustawa_num_v2','qow_fasl_num_v2','qow_acad_year_v2','qow_mustawa_label_v1','qow_prev_year_income_2027_v1','qow_prev_year_income_2028_v1']);
   const S = {
     qow_maddah_catalog_v2: v => maddahCatalog = v, qow_weekly_sched_v1: v => weeklyScheduleByDay = v,
@@ -8088,71 +8091,115 @@
     qow_prev_year_income_2028_v1: v => prevYearIncome2028 = Number(v) || 0, qow_maddah_att_v6: v => maddahAttendanceLogs = v,
     qow_custom_taqwim_v2: () => {}
   };
-  const last = {}, lastS = {};
-  let db, fs, auth, am, ready = 0, applying = false, warned = false;
+  const last = {}, lastS = {}, lastK = {}, have = {}, haveS = {}, haveK = {};
+  let db, fs, auth, am, ready = 0, applying = false, warned = false, rt, rm, rk;
   const orig = Storage.prototype.setItem;
-  const toast = (m) => { try { showToast(m, 'error'); } catch (e) {} };
+  const toast = m => { try { showToast(m, 'error'); } catch (e) {} };
+  const em = () => (auth && auth.currentUser && auth.currentUser.email) || '';
+  const canData = k => k === 'qow_maddah_att_v6' ? em() === EM.masul : KASK(k) ? em() === EM.bendahara : em() === EM.pengurus;
+  const canon = o => { const r = {}; Object.keys(o).sort().forEach(k => r[k] = o[k]); return JSON.stringify(r); };
+  const split = st => { const { roqm, role, ...rest } = st; const p = {}, k = {}; for (const f in rest) (KASF.test(f) ? k : p)[f] = rest[f]; return [p, k]; };
+  const run = (list, ms, h) => { clearTimeout(h.t); h.t = setTimeout(() => list.forEach(n => { try { window[n] && window[n](); } catch (e) {} }), ms); };
+  const hA = {}, hM = {}, hK = {};
+  const rerender = () => run(['recalculateMaddahWeeklySaahAndHirman','syncGlobalAcademicLabels','renderWeeklyScheduleTable','renderTasksAndExams','renderBerandaReminders','renderBankSoalAndShortcuts','renderAnggotaDirectory','onMasulDateChange'], 250, hA);
+  const rerenderMembers = () => run(['renderAnggotaDirectory','renderExactStrukturalChart'], 250, hM);
+  const rerenderKas = () => run(['renderKasSpreadsheet'], 250, hK);
 
   Storage.prototype.setItem = function (k, v) {
     orig.call(this, k, v);
-    if (ON && ready >= 2 && !applying && this === localStorage && (k in S || k === STU)) push(k, String(v));
+    if (ON && ready >= 3 && !applying && this === localStorage && (k in S || k === STU)) push(k, String(v));
   };
 
+  async function put(col, id, j, memo, seen) {
+    if (memo[id] === j) return;
+    const old = memo[id]; memo[id] = j;
+    try { await fs.setDoc(fs.doc(db, col, String(id)), { json: j }); seen[id] = true; }
+    catch (e) { memo[id] = old; throw e; }
+  }
   async function push(k, v) {
     try {
       if (k === STU) {
+        const anon = !auth.currentUser || auth.currentUser.isAnonymous;
         for (const st of JSON.parse(v)) {
-          const { roqm, role, ...p } = st; const j = JSON.stringify(p);
-          if (lastS[st.id] !== j) { lastS[st.id] = j; await fs.setDoc(fs.doc(db, 'students', String(st.id)), { json: j }); }
+          const [p, kk] = split(st);
+          if (!(anon && !haveS[st.id])) await put('students', st.id, canon(p), lastS, haveS);
+          if (em() === EM.bendahara) await put('kas', st.id, canon(kk), lastK, haveK);
         }
-      } else if (last[k] !== v) { last[k] = v; await fs.setDoc(fs.doc(db, 'data', k), { json: v }); }
+      } else if (canData(k)) { await put('data', k, v, last, have); }
     } catch (e) {
       console.warn('sync gagal', k, e);
       if (!warned) { warned = true; toast('Perubahan belum bisa disimpan ke server (hanya di HP ini).'); }
     }
   }
-
   function applyData(k, raw) {
     if (!(k in S)) return;
-    last[k] = raw; applying = true;
+    last[k] = raw; have[k] = true; applying = true;
     try { orig.call(localStorage, k, raw); S[k](RAW.has(k) ? raw : JSON.parse(raw)); } finally { applying = false; }
   }
-  function rerender() {
-    ['recalculateMaddahWeeklySaahAndHirman','syncGlobalAcademicLabels','renderWeeklyScheduleTable','renderTasksAndExams',
-     'renderBerandaReminders','renderBankSoalAndShortcuts','renderAnggotaDirectory','onMasulDateChange']
-      .forEach(n => { try { window[n] && window[n](); } catch (e) {} });
+  function persist() { applying = true; try { orig.call(localStorage, STU, JSON.stringify(students)); } finally { applying = false; } }
+  function listen(col, memo, seen, isKas) {
+    fs.onSnapshot(fs.collection(db, col), snap => {
+      let ch = false;
+      snap.docChanges().forEach(c => {
+        if (c.doc.metadata.hasPendingWrites) return;
+        const id = c.doc.id, j = c.doc.data().json; seen[id] = true;
+        const o = JSON.parse(j);
+        if (!isKas) for (const f in o) if (KASF.test(f)) delete o[f];
+        memo[id] = isKas ? j : canon(o);
+        const st = students.find(x => String(x.id) === id);
+        if (st) { Object.assign(st, o); ch = true; }
+      });
+      if (ch) persist();
+      ready++; if (ch) (isKas ? rerenderKas : rerenderMembers)();
+    }, e => { ready++; console.warn('listen ' + col, e); });
   }
   async function seed() {
-    for (const k in S) { const v = localStorage.getItem(k); if (v !== null && !(k in last)) await push(k, v); }
-    for (const st of students) if (!(st.id in lastS)) { const l = localStorage.getItem(STU); if (l) { await push(STU, l); break; } }
+    for (const k in S) { const v = localStorage.getItem(k); if (v !== null && !have[k]) await push(k, v); }
+    const l = localStorage.getItem(STU); if (l) await push(STU, l);
   }
   async function verify(role, pwd) {
     if (!ON) { toast('Sinkronisasi belum dikonfigurasi (config Firebase masih kosong).'); return false; }
     try { await am.signInWithEmailAndPassword(auth, EM[role], pwd); await seed(); return true; } catch (e) { return false; }
   }
-  window.QOWSYNC = { verify };
+  function ask(title) {
+    return new Promise(res => {
+      const d = document.createElement('div');
+      d.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px';
+      d.innerHTML = '<div style="background:#fff;border-radius:16px;padding:20px;max-width:340px;width:100%;font-family:sans-serif"><div data-t style="font-weight:700;margin-bottom:10px;color:#222"></div><input type="password" autocomplete="current-password" style="width:100%;box-sizing:border-box;padding:10px;border:1px solid #bbb;border-radius:10px;font-size:16px"><div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end"><button data-c style="padding:8px 14px;border-radius:10px;border:1px solid #bbb;background:#fff;color:#222">Batal</button><button data-o style="padding:8px 14px;border-radius:10px;border:0;background:#2f6b3f;color:#fff">Masuk</button></div></div>';
+      d.querySelector('[data-t]').textContent = title;
+      const inp = d.querySelector('input'); document.body.appendChild(d); inp.focus();
+      const done = v => { d.remove(); res(v); };
+      d.querySelector('[data-c]').onclick = () => done(null);
+      d.querySelector('[data-o]').onclick = () => done(inp.value);
+      inp.onkeydown = e => { if (e.key === 'Enter') done(inp.value); };
+    });
+  }
+  async function gate(role) {
+    if (!ON) { toast('Sinkronisasi belum dikonfigurasi (config Firebase masih kosong).'); return false; }
+    if (em() === EM[role]) return true;
+    const pwd = await ask('Password Bendahara');
+    if (pwd === null) return false;
+    const ok = await verify(role, pwd);
+    if (!ok) toast('Password salah.');
+    return ok;
+  }
+  window.QOWSYNC = { verify, gate };
   if (!ON) return;
 
   (async () => {
     const B = 'https://www.gstatic.com/firebasejs/10.12.2/';
     const A = await import(B + 'firebase-app.js'); fs = await import(B + 'firebase-firestore.js'); am = await import(B + 'firebase-auth.js');
-    const app = A.initializeApp(cfg); db = fs.getFirestore(app); auth = am.getAuth(app);
+    const app = A.initializeApp(cfg);
+    try { db = fs.initializeFirestore(app, { localCache: fs.persistentLocalCache({ tabManager: fs.persistentMultipleTabManager() }) }); } catch (e) { db = fs.getFirestore(app); }
+    auth = am.getAuth(app);
     if (!auth.currentUser) await am.signInAnonymously(auth);
     fs.onSnapshot(fs.collection(db, 'data'), snap => {
       let ch = false;
       snap.docChanges().forEach(c => { if (!c.doc.metadata.hasPendingWrites) { applyData(c.doc.id, c.doc.data().json); ch = true; } });
       ready++; if (ch) rerender();
-    });
-    fs.onSnapshot(fs.collection(db, 'students'), snap => {
-      let ch = false;
-      snap.docChanges().forEach(c => {
-        if (c.doc.metadata.hasPendingWrites) return;
-        const j = c.doc.data().json; lastS[c.doc.id] = j;
-        const st = students.find(s => String(s.id) === c.doc.id); if (st) { Object.assign(st, JSON.parse(j)); ch = true; }
-      });
-      if (ch) { applying = true; try { orig.call(localStorage, STU, JSON.stringify(students)); } finally { applying = false; } }
-      ready++; if (ch) rerender();
-    });
+    }, e => { ready++; console.warn('listen data', e); });
+    listen('students', lastS, haveS, false);
+    listen('kas', lastK, haveK, true);
   })().catch(e => console.warn('Firebase gagal dimuat', e));
 })();
 </script>
