@@ -1268,7 +1268,7 @@
                 </button>
             </div>
 
-            <!-- Password Gate for Pengurus Kelas (Password: limalapan) -->
+            <!-- Password Gate for Pengurus Kelas  -->
             <div id="adminEditorPasswordGate" class="bg-cream-100 rounded-2xl p-5 border border-olive-200 text-center space-y-3 max-w-md mx-auto">
                 <div class="w-11 h-11 rounded-2xl bg-[#607456] text-cream-100 flex items-center justify-center mx-auto text-base shadow">
                     <i class="fa-solid fa-key"></i>
@@ -4453,9 +4453,9 @@
             document.getElementById('masulPasswordModal').classList.add('hidden');
         }
 
-        function submitMasulPassword() {
+        async function submitMasulPassword() {
             const val = document.getElementById('masulPwdInput').value.trim();
-            if (val === 'qowwamoon58') {
+            if (await QOWSYNC.verify('masul', val)) {
                 isMasulAuthenticated = true;
                 accessMode = 'masul';
                 closeMasulPasswordModal();
@@ -4587,9 +4587,9 @@
             document.getElementById('adminScheduleEditorModal').classList.add('hidden');
         }
 
-        function unlockAdminEditorModal() {
+        async function unlockAdminEditorModal() {
             const pwd = document.getElementById('adminEditorPwdInput').value.trim();
-            if (pwd === 'limalapan') {
+            if (await QOWSYNC.verify('pengurus', pwd)) {
                 isAdminEditorUnlocked = true;
                 syncAdminEditorView();
                 showToast("Mode Pengurus Kelas aktif!");
@@ -8067,5 +8067,94 @@
 })();
 </script>
 <!-- ================= AKHIR SINKRONISASI KALENDER BERANDA & KALDIK MAS'UL ================= -->
+
+<!-- ===== SINKRONISASI FIREBASE (QOWSYNC) ===== -->
+<script>
+(function () {
+  // ISI BAGIAN INI dari Firebase Console > Project settings > Your apps (Web)
+  const cfg = { apiKey: 'AIzaSyDDMrMhED41-9A3UhozBbqe6Ec6X4VrRjQ', authDomain: 'qowwamoon.firebaseapp.com', projectId: 'qowwamoon', appId: '1:23930847825:web:10dab6b4e225e9fc07ae70' };
+  const ON = !!cfg.projectId;
+  const EM = { pengurus: 'pengurus@qowwamoon.app', masul: 'masul@qowwamoon.app' };
+  const STU = 'qow_students_2027_v1';
+  const RAW = new Set(['qow_mustawa_num_v2','qow_fasl_num_v2','qow_acad_year_v2','qow_mustawa_label_v1','qow_prev_year_income_2027_v1','qow_prev_year_income_2028_v1']);
+  const S = {
+    qow_maddah_catalog_v2: v => maddahCatalog = v, qow_weekly_sched_v1: v => weeklyScheduleByDay = v,
+    qow_mustawa_num_v2: v => activeMustawaNum = Number(v) || 4, qow_fasl_num_v2: v => activeFaslNum = Number(v) || 1,
+    qow_acad_year_v2: v => activeAcademicYear = v, qow_mustawa_label_v1: v => activeMustawaLabel = v,
+    qow_todo_master_v1: v => todoTasksMaster = v, qow_exam_list_v1: v => examList = v,
+    qow_daily_faedah_v2: v => dailyFaedahList = v, qow_bank_maddah_list_v2: v => maddahList = v,
+    qow_custom_banksoal_v1: v => customBankSoal = v, qow_expenses_2027_v1: v => expenses = v,
+    qow_expenses_2028_v1: v => expenses2028 = v, qow_prev_year_income_2027_v1: v => prevYearIncome = Number(v) || 0,
+    qow_prev_year_income_2028_v1: v => prevYearIncome2028 = Number(v) || 0, qow_maddah_att_v6: v => maddahAttendanceLogs = v,
+    qow_custom_taqwim_v2: () => {}
+  };
+  const last = {}, lastS = {};
+  let db, fs, auth, am, ready = 0, applying = false, warned = false;
+  const orig = Storage.prototype.setItem;
+  const toast = (m) => { try { showToast(m, 'error'); } catch (e) {} };
+
+  Storage.prototype.setItem = function (k, v) {
+    orig.call(this, k, v);
+    if (ON && ready >= 2 && !applying && this === localStorage && (k in S || k === STU)) push(k, String(v));
+  };
+
+  async function push(k, v) {
+    try {
+      if (k === STU) {
+        for (const st of JSON.parse(v)) {
+          const { roqm, role, ...p } = st; const j = JSON.stringify(p);
+          if (lastS[st.id] !== j) { lastS[st.id] = j; await fs.setDoc(fs.doc(db, 'students', String(st.id)), { json: j }); }
+        }
+      } else if (last[k] !== v) { last[k] = v; await fs.setDoc(fs.doc(db, 'data', k), { json: v }); }
+    } catch (e) {
+      console.warn('sync gagal', k, e);
+      if (!warned) { warned = true; toast('Perubahan belum bisa disimpan ke server (hanya di HP ini).'); }
+    }
+  }
+
+  function applyData(k, raw) {
+    if (!(k in S)) return;
+    last[k] = raw; applying = true;
+    try { orig.call(localStorage, k, raw); S[k](RAW.has(k) ? raw : JSON.parse(raw)); } finally { applying = false; }
+  }
+  function rerender() {
+    ['recalculateMaddahWeeklySaahAndHirman','syncGlobalAcademicLabels','renderWeeklyScheduleTable','renderTasksAndExams',
+     'renderBerandaReminders','renderBankSoalAndShortcuts','renderAnggotaDirectory','onMasulDateChange']
+      .forEach(n => { try { window[n] && window[n](); } catch (e) {} });
+  }
+  async function seed() {
+    for (const k in S) { const v = localStorage.getItem(k); if (v !== null && !(k in last)) await push(k, v); }
+    for (const st of students) if (!(st.id in lastS)) { const l = localStorage.getItem(STU); if (l) { await push(STU, l); break; } }
+  }
+  async function verify(role, pwd) {
+    if (!ON) { toast('Sinkronisasi belum dikonfigurasi (config Firebase masih kosong).'); return false; }
+    try { await am.signInWithEmailAndPassword(auth, EM[role], pwd); await seed(); return true; } catch (e) { return false; }
+  }
+  window.QOWSYNC = { verify };
+  if (!ON) return;
+
+  (async () => {
+    const B = 'https://www.gstatic.com/firebasejs/10.12.2/';
+    const A = await import(B + 'firebase-app.js'); fs = await import(B + 'firebase-firestore.js'); am = await import(B + 'firebase-auth.js');
+    const app = A.initializeApp(cfg); db = fs.getFirestore(app); auth = am.getAuth(app);
+    if (!auth.currentUser) await am.signInAnonymously(auth);
+    fs.onSnapshot(fs.collection(db, 'data'), snap => {
+      let ch = false;
+      snap.docChanges().forEach(c => { if (!c.doc.metadata.hasPendingWrites) { applyData(c.doc.id, c.doc.data().json); ch = true; } });
+      ready++; if (ch) rerender();
+    });
+    fs.onSnapshot(fs.collection(db, 'students'), snap => {
+      let ch = false;
+      snap.docChanges().forEach(c => {
+        if (c.doc.metadata.hasPendingWrites) return;
+        const j = c.doc.data().json; lastS[c.doc.id] = j;
+        const st = students.find(s => String(s.id) === c.doc.id); if (st) { Object.assign(st, JSON.parse(j)); ch = true; }
+      });
+      if (ch) { applying = true; try { orig.call(localStorage, STU, JSON.stringify(students)); } finally { applying = false; } }
+      ready++; if (ch) rerender();
+    });
+  })().catch(e => console.warn('Firebase gagal dimuat', e));
+})();
+</script>
 </body>
 </html>
