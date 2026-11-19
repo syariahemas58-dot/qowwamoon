@@ -8199,7 +8199,7 @@
       };
       const ttl = ((it.titleTranslations && it.titleTranslations[currentLang]) || it.title || '').trim();
       if (isAr(ttl) && !/[A-Za-z]/.test(ttl)) add(ttl, 62, 800, TJ, INK, 'rtl', 1.7, 26); else add(ttl, 46, 700, LA, INK, 'ltr', 1.4, 26);
-      rows.push({ t: '', font: '', col: '', dir: 'ltr', lh: 14, line: true });
+      rows.push({ t: '', font: '', col: '', dir: 'ltr', lh: 76, line: true });
       const body = (it.contentTranslations && it.contentTranslations[currentLang]) || it.content || '';
       body.split('\n').forEach(par => {
         const t = par.trim();
@@ -8223,7 +8223,7 @@
     }
     let y = top0 + Math.max(0, (avail - hOf(rows)) / 2);
     for (const r of rows) {
-      if (r.line) { c.fillStyle = GREEN; c.fillRect(W / 2 - 60, y + 6, 120, 4); }
+      if (r.line) { c.fillStyle = GREEN; c.fillRect(W / 2 - 60, y + 36, 120, 4); }
       else if (r.t) { c.font = r.font; c.direction = r.dir; c.fillStyle = r.col; c.fillText(r.t, W / 2, y); }
       y += r.lh;
     }
