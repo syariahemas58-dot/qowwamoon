@@ -8120,7 +8120,8 @@
   const toast = (m, t) => { try { showToast(m, t); } catch (e) {} };
   let curId = null;
   const getItem = () => dailyFaedahList.find(f => f.id === curId);
-  const shareUrl = id => location.origin + location.pathname + '?faedah=' + encodeURIComponent(id);
+  const PUB = 'https://qowwamoon.vercel.app/'; // alamat utama web, ubah di sini kalau domain berganti
+  const shareUrl = id => PUB + '?faedah=' + encodeURIComponent(id);
   const locTitle = it => (it.titleTranslations && it.titleTranslations[currentLang]) || it.title || 'Daily Faedah';
   const B = 'display:block;width:100%;padding:12px;margin-top:8px;border-radius:12px;border:1px solid ' + GREEN + ';background:#fff;color:' + INK + ';font-weight:700;font-size:14px';
   const BG = B.replace('background:#fff;color:' + INK, 'background:' + GREEN + ';color:#fff');
@@ -8179,15 +8180,15 @@
     const W = 1080, H = fmt === 'story' ? 1920 : 1080;
     const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
     const c = cv.getContext('2d');
-    try { await Promise.all(['700 40px Amiri', '400 40px Amiri', '700 40px "Plus Jakarta Sans"', '500 40px "Plus Jakarta Sans"'].map(f => document.fonts.load(f))); } catch (e) {}
+    try { await Promise.all(['800 40px Tajawal', '700 40px Tajawal', '500 40px Tajawal', '700 40px "Plus Jakarta Sans"', '500 40px "Plus Jakarta Sans"'].map(f => document.fonts.load(f))); } catch (e) {}
     c.fillStyle = CREAM; c.fillRect(0, 0, W, H);
     c.strokeStyle = GREEN; c.lineWidth = 6; c.strokeRect(36, 36, W - 72, H - 72);
     c.textBaseline = 'top'; c.textAlign = 'center';
-    const pad = 110, cw = W - pad * 2, T = fill(it.titleTranslations, it.title), C = fill(it.contentTranslations, it.content);
+    const pad = 110, cw = W - pad * 2;
     c.direction = 'ltr'; c.font = '700 28px "Plus Jakarta Sans", sans-serif'; c.fillStyle = GREEN;
     c.fillText('DAILY FAEDAH  •  QOWWAMOON', W / 2, pad - 20);
     const footH = 250, top0 = pad + 60, avail = H - pad - footH - top0;
-    const AR = 'Amiri, "Aref Ruqaa", serif', LA = '"Plus Jakarta Sans", sans-serif';
+    const LA = '"Plus Jakarta Sans", Tajawal, sans-serif', TJ = 'Tajawal, "Plus Jakarta Sans", sans-serif';
     const build = s => {
       const rows = [];
       const add = (txt, size, w, fam, col, dir, lh, gap) => {
@@ -8196,11 +8197,17 @@
         wrap(c, txt, cw).forEach(t => rows.push({ t, font: c.font, col, dir, lh: size * lh }));
         rows.push({ t: '', font: c.font, col, dir, lh: gap });
       };
-      add(T.ar, 64, 700, AR, INK, 'rtl', 1.7, 10);
-      add(T.id, 40, 700, LA, INK, 'ltr', 1.4, 24);
+      const ttl = ((it.titleTranslations && it.titleTranslations[currentLang]) || it.title || '').trim();
+      if (isAr(ttl) && !/[A-Za-z]/.test(ttl)) add(ttl, 62, 800, TJ, INK, 'rtl', 1.7, 26); else add(ttl, 46, 700, LA, INK, 'ltr', 1.4, 26);
       rows.push({ t: '', font: '', col: '', dir: 'ltr', lh: 14, line: true });
-      add(C.ar, 54 * s, 400, AR, INK, 'rtl', 1.85, 22 * s);
-      add(C.id, 34 * s, 500, LA, '#3d4a38', 'ltr', 1.55, 10);
+      const body = (it.contentTranslations && it.contentTranslations[currentLang]) || it.content || '';
+      body.split('\n').forEach(par => {
+        const t = par.trim();
+        if (!t) { rows.push({ t: '', font: '', col: '', dir: 'ltr', lh: 14 * s }); return; }
+        const na = (t.match(/[\u0600-\u06FF]/g) || []).length, nl = (t.match(/[A-Za-z]/g) || []).length;
+        if (na > nl) add(t, 50 * s, 500, TJ, INK, 'rtl', 1.9, 6 * s);
+        else add(t, 34 * s, 500, LA, '#3d4a38', 'ltr', 1.55, 4 * s);
+      });
       return rows;
     };
     const hOf = r => r.reduce((a, x) => a + x.lh, 0);
@@ -8235,7 +8242,7 @@
     c.beginPath(); c.arc(x0 + R, cy, R, 0, Math.PI * 2); c.lineWidth = 4; c.strokeStyle = GREEN; c.stroke();
     c.textAlign = 'left'; c.fillStyle = '#7b8a73'; c.font = '500 26px ' + LA; c.fillText('Ditulis oleh', x0 + R * 2 + 28, cy - 38);
     c.fillStyle = INK; c.font = '700 38px ' + LA; c.fillText(name, x0 + R * 2 + 28, cy + 2, nw);
-    c.textAlign = 'center'; c.fillStyle = GREEN; c.font = '600 28px ' + LA; c.fillText(location.host, W / 2, H - pad - 40);
+    c.textAlign = 'center'; c.fillStyle = GREEN; c.font = '600 28px ' + LA; c.fillText('qowwamoon.vercel.app', W / 2, H - pad - 40);
     return cv;
   }
 
