@@ -1379,6 +1379,13 @@
                         <input type="file" id="adminNewTaskFiles" multiple accept="image/*,.pdf" onchange="handleAdminTaskFilesSelect(event)" class="w-full text-xs text-olive-700 file:mr-3 file:py-1.5 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-extrabold file:bg-olive-100 file:text-[#607456] hover:file:bg-olive-200">
                         <div id="adminNewTaskFilesPreview" class="flex flex-wrap gap-2 pt-1"></div>
                     </div>
+                    <div class="bg-white p-3.5 rounded-xl border border-olive-200 space-y-2">
+                        <label class="block font-extrabold text-olive-800">
+                            <i class="fa-brands fa-google-drive text-[#607456] mr-1"></i> Tambahkan Link Drive Pengumpulan Tugas (Opsional):
+                        </label>
+                        <input type="url" id="adminNewTaskDrive" placeholder="https://drive.google.com/..." class="w-full bg-white border border-olive-300 rounded-xl px-3 py-2 font-medium text-olive-900 focus:outline-none focus:ring-2 focus:ring-[#607456]">
+                        <p class="text-[10px] text-olive-600">Thullab akan melihat tombol "Kumpulkan di Drive" pada tugas ini.</p>
+                    </div>
                     <button type="button" onclick="adminAddNewTodoTask()" class="bg-[#607456] hover:bg-olive-700 text-cream-100 font-extrabold px-4 py-2.5 rounded-xl shadow transition">
                         + Tambahkan ke List Tugas
                     </button>
@@ -4457,6 +4464,7 @@
             const val = document.getElementById('masulPwdInput').value.trim();
             if (await QOWSYNC.verify('masul', val)) {
                 isMasulAuthenticated = true;
+                const _md = document.getElementById('masulDateInput'); if (_md) { _md.value = localTodayIso(); masulHolidayOverrideActive = false; onMasulDateChange(); }
                 accessMode = 'masul';
                 closeMasulPasswordModal();
                 document.getElementById('entryGateOverlay').classList.add('hidden');
@@ -4807,13 +4815,40 @@
                 <div class="p-3 rounded-xl bg-cream-100 border border-olive-200 flex items-center justify-between gap-2">
                     <div class="min-w-0">
                         <span class="font-extrabold text-olive-900 block truncate">${t.title.id}</span>
-                        <span class="text-[10px] text-olive-600">Deadline: ${t.deadline.id} • ${(t.attachments || []).length} lampiran</span>
+                        <span class="text-[10px] text-olive-600">Deadline: ${t.deadline.id} • ${(t.attachments || []).length} lampiran${t.driveLink ? ' • ada link Drive' : ''}</span>
                     </div>
+                    <button type="button" onclick="adminSetTaskDrive(${idx})" class="bg-sky-100 hover:bg-sky-600 text-sky-700 hover:text-white font-extrabold px-2.5 py-1.5 rounded-xl text-[10px] mr-1 shrink-0"><i class="fa-brands fa-google-drive"></i> Link Drive</button>
                     <button type="button" onclick="adminDeleteTodoTask(${idx})" class="bg-rose-100 hover:bg-rose-600 text-rose-700 hover:text-white font-extrabold px-2.5 py-1.5 rounded-xl text-[11px] transition shrink-0">
                         <i class="fa-solid fa-trash"></i> Hapus
                     </button>
                 </div>
             `).join('');
+        }
+
+        function safeDriveLink(l) {
+            try {
+                const u = new URL(String(l || '').trim());
+                if (u.protocol !== 'https:') return '';
+                if (!['drive.google.com', 'docs.google.com', 'forms.gle'].includes(u.hostname)) return '';
+                return u.href.replace(/["'<>]/g, c => encodeURIComponent(c));
+            } catch (e) { return ''; }
+        }
+
+        function adminSetTaskDrive(idx) {
+            const t = todoTasksMaster[idx];
+            if (!t) return;
+            const v = prompt('Tempel link Drive pengumpulan tugas (kosongkan untuk menghapus):', t.driveLink || '');
+            if (v === null) return;
+            const raw = v.trim();
+            if (raw) {
+                const l = safeDriveLink(raw);
+                if (!l) { showToast("Link harus dari Google Drive (drive.google.com / docs.google.com / forms.gle).", "error"); return; }
+                t.driveLink = l;
+            } else { delete t.driveLink; }
+            saveState();
+            renderAdminTasksEditor();
+            renderTasksAndExams();
+            showToast("Link Drive tugas diperbarui.");
         }
 
         function adminAddNewTodoTask() {
@@ -4825,6 +4860,9 @@
                 showToast("Judul tugas wajib diisi.", "error");
                 return;
             }
+            const driveRaw = (document.getElementById('adminNewTaskDrive')?.value || '').trim();
+            const driveLink = driveRaw ? safeDriveLink(driveRaw) : '';
+            if (driveRaw && !driveLink) { showToast("Link harus dari Google Drive (drive.google.com / docs.google.com / forms.gle).", "error"); return; }
             const safeDescHtml = `<div class="text-xs bg-white/90 p-3.5 rounded-xl border border-olive-200 whitespace-pre-line font-medium text-olive-900">${desc || '-'}</div>`;
             todoTasksMaster.push({
                 id: "task-" + Date.now(),
@@ -4832,12 +4870,14 @@
                 deadline: { id: dl, ar: dl, en: dl },
                 title: { id: title, ar: title, en: title },
                 detailsHtml: { id: safeDescHtml, ar: safeDescHtml, en: safeDescHtml },
-                attachments: [...tempAdminTaskFiles]
+                attachments: [...tempAdminTaskFiles],
+                ...(driveLink ? { driveLink } : {})
             });
             tempAdminTaskFiles = [];
             document.getElementById('adminNewTaskTitle').value = '';
             document.getElementById('adminNewTaskDesc').value = '';
             document.getElementById('adminNewTaskDeadline').value = '';
+            const dInput = document.getElementById('adminNewTaskDrive'); if (dInput) dInput.value = '';
             const fInput = document.getElementById('adminNewTaskFiles');
             if (fInput) fInput.value = '';
             renderTempAdminTaskFilesPreview();
@@ -6574,7 +6614,7 @@
                                         </div>
                                         <h4 class="font-extrabold text-sm sm:text-base text-olive-900 ${isDone ? 'line-through opacity-75' : ''}">${tTitle}</h4>
                                         ${detHtml}
-                                        ${attHtml}
+                                        ${attHtml}${(!isGuest && safeDriveLink(t.driveLink)) ? `<div class="pt-2"><a href="${safeDriveLink(t.driveLink)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation();" class="inline-flex items-center gap-1.5 bg-[#607456] hover:bg-olive-700 text-cream-100 text-xs font-extrabold px-3 py-1.5 rounded-xl"><i class="fa-brands fa-google-drive"></i> <span>Kumpulkan di Drive</span></a></div>` : ''}
                                     </div>
                                 </div>
                                 ${!isGuest ? `
@@ -7246,12 +7286,14 @@
             updateLiveOngoingStatus();
         }
 
+        function localTodayIso() { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+
         window.onload = function () {
-            const defaultMasulDate = "2026-11-09";
+            const defaultMasulDate = localTodayIso();
             const mDate = document.getElementById('masulDateInput');
             if (mDate) mDate.value = defaultMasulDate;
             const eDate = document.getElementById('expDateInput');
-            if (eDate) eDate.value = new Date().toISOString().slice(0, 10);
+            if (eDate) eDate.value = localTodayIso();
 
             const now = new Date();
             berandaCalYear = now.getFullYear();
@@ -8070,6 +8112,181 @@
 </script>
 <!-- ================= AKHIR SINKRONISASI KALENDER BERANDA & KALDIK MAS'UL ================= -->
 
+<!-- ===== BAGIKAN DAILY FAEDAH ===== -->
+<script>
+(function () {
+  const GREEN = '#607456', CREAM = '#f4efe0', INK = '#2d3b28';
+  const $ = id => document.getElementById(id);
+  const toast = (m, t) => { try { showToast(m, t); } catch (e) {} };
+  let curId = null;
+  const getItem = () => dailyFaedahList.find(f => f.id === curId);
+  const shareUrl = id => location.origin + location.pathname + '?faedah=' + encodeURIComponent(id);
+  const locTitle = it => (it.titleTranslations && it.titleTranslations[currentLang]) || it.title || 'Daily Faedah';
+  const B = 'display:block;width:100%;padding:12px;margin-top:8px;border-radius:12px;border:1px solid ' + GREEN + ';background:#fff;color:' + INK + ';font-weight:700;font-size:14px';
+  const BG = B.replace('background:#fff;color:' + INK, 'background:' + GREEN + ';color:#fff');
+
+  function sheet(html) {
+    const d = document.createElement('div');
+    d.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:99998;display:flex;align-items:flex-end;justify-content:center';
+    d.innerHTML = '<div style="background:#fff;width:100%;max-width:440px;border-radius:20px 20px 0 0;padding:18px;font-family:sans-serif;max-height:94vh;overflow:auto">' + html + '</div>';
+    document.body.appendChild(d); return d;
+  }
+  async function copy(t) {
+    try { await navigator.clipboard.writeText(t); }
+    catch (e) { const a = document.createElement('textarea'); a.value = t; document.body.appendChild(a); a.select(); try { document.execCommand('copy'); } catch (e2) {} a.remove(); }
+    toast('Link disalin');
+  }
+
+  window.openFaedahShareMenu = function () {
+    const it = getItem(); if (!it) return;
+    const d = sheet('<div style="font-weight:800;color:' + INK + '">Bagikan Daily Faedah</div><button data-a="share" style="' + B + '">Bagikan link</button><button data-a="copy" style="' + B + '">Salin link</button><button data-a="img" style="' + B + '">Buat gambar</button><button data-a="x" style="' + B + ';border-color:#bbb">Tutup</button>');
+    d.onclick = async e => {
+      const a = e.target.dataset && e.target.dataset.a;
+      if (e.target === d || a === 'x') return d.remove();
+      if (a === 'copy') { await copy(shareUrl(it.id)); d.remove(); }
+      if (a === 'share') {
+        d.remove();
+        if (navigator.share) { try { await navigator.share({ title: locTitle(it), text: locTitle(it), url: shareUrl(it.id) }); } catch (e2) {} }
+        else await copy(shareUrl(it.id));
+      }
+      if (a === 'img') { d.remove(); imageDialog(it); }
+    };
+  };
+
+  const loadImg = src => new Promise(r => { const i = new Image(); i.onload = () => r(i); i.onerror = () => r(null); i.src = src; });
+  async function logoImg() {
+    try {
+      const m = getQowwamoonLogoAvatarHtml('a', 'b').match(/<svg[\s\S]*<\/svg>/)[0].replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="310"');
+      return await loadImg('data:image/svg+xml;charset=utf-8,' + encodeURIComponent(m));
+    } catch (e) { return null; }
+  }
+  function wrap(c, text, maxW) {
+    const out = [];
+    for (const para of String(text || '').split('\n')) {
+      let line = '';
+      for (const w of para.split(/\s+/).filter(Boolean)) {
+        const t = line ? line + ' ' + w : w;
+        if (c.measureText(t).width > maxW && line) { out.push(line); line = w; } else line = t;
+      }
+      out.push(line);
+    }
+    return out;
+  }
+  const isAr = s => /[\u0600-\u06FF]/.test(s || '');
+  const fill = (tr, fb) => { const r = { ar: (tr && tr.ar) || '', id: (tr && tr.id) || '' }; if (fb) { if (isAr(fb)) r.ar = r.ar || fb; else r.id = r.id || fb; } return r; };
+
+  async function render(it, fmt) {
+    const W = 1080, H = fmt === 'story' ? 1920 : 1080;
+    const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+    const c = cv.getContext('2d');
+    try { await Promise.all(['700 40px Amiri', '400 40px Amiri', '700 40px "Plus Jakarta Sans"', '500 40px "Plus Jakarta Sans"'].map(f => document.fonts.load(f))); } catch (e) {}
+    c.fillStyle = CREAM; c.fillRect(0, 0, W, H);
+    c.strokeStyle = GREEN; c.lineWidth = 6; c.strokeRect(36, 36, W - 72, H - 72);
+    c.textBaseline = 'top'; c.textAlign = 'center';
+    const pad = 110, cw = W - pad * 2, T = fill(it.titleTranslations, it.title), C = fill(it.contentTranslations, it.content);
+    c.direction = 'ltr'; c.font = '700 28px "Plus Jakarta Sans", sans-serif'; c.fillStyle = GREEN;
+    c.fillText('DAILY FAEDAH  •  QOWWAMOON', W / 2, pad - 20);
+    const footH = 250, top0 = pad + 60, avail = H - pad - footH - top0;
+    const AR = 'Amiri, "Aref Ruqaa", serif', LA = '"Plus Jakarta Sans", sans-serif';
+    const build = s => {
+      const rows = [];
+      const add = (txt, size, w, fam, col, dir, lh, gap) => {
+        if (!txt) return;
+        c.font = w + ' ' + Math.round(size) + 'px ' + fam; c.direction = dir;
+        wrap(c, txt, cw).forEach(t => rows.push({ t, font: c.font, col, dir, lh: size * lh }));
+        rows.push({ t: '', font: c.font, col, dir, lh: gap });
+      };
+      add(T.ar, 64, 700, AR, INK, 'rtl', 1.7, 10);
+      add(T.id, 40, 700, LA, INK, 'ltr', 1.4, 24);
+      rows.push({ t: '', font: '', col: '', dir: 'ltr', lh: 14, line: true });
+      add(C.ar, 54 * s, 400, AR, INK, 'rtl', 1.85, 22 * s);
+      add(C.id, 34 * s, 500, LA, '#3d4a38', 'ltr', 1.55, 10);
+      return rows;
+    };
+    const hOf = r => r.reduce((a, x) => a + x.lh, 0);
+    let rows = null;
+    for (let s = 1; s >= 0.55; s -= 0.05) { const r = build(s); if (hOf(r) <= avail) { rows = r; break; } }
+    if (!rows) {
+      rows = build(0.55); let h = 0; const keep = [];
+      for (const r of rows) { if (h + r.lh > avail - 70) break; keep.push(r); h += r.lh; }
+      while (keep.length && !keep[keep.length - 1].t) keep.pop();
+      if (keep.length) keep[keep.length - 1] = Object.assign({}, keep[keep.length - 1], { t: keep[keep.length - 1].t + ' …' });
+      keep.push({ t: 'baca selengkapnya di web', font: '600 30px ' + LA, col: GREEN, dir: 'ltr', lh: 50 });
+      rows = keep;
+    }
+    let y = top0 + Math.max(0, (avail - hOf(rows)) / 2);
+    for (const r of rows) {
+      if (r.line) { c.fillStyle = GREEN; c.fillRect(W / 2 - 60, y + 6, 120, 4); }
+      else if (r.t) { c.font = r.font; c.direction = r.dir; c.fillStyle = r.col; c.fillText(r.t, W / 2, y); }
+      y += r.lh;
+    }
+    // penulis
+    const info = getFaedahAuthorInfo(it.authorId), anon = info.isAnon;
+    const name = anon ? 'Thullab Qowwamoon' : info.name;
+    const img = anon ? await logoImg() : (info.photo ? await loadImg(info.photo) : null);
+    const R = 56, cy = H - pad - 150;
+    c.direction = 'ltr'; c.font = '700 38px ' + LA;
+    const nw = Math.min(c.measureText(name).width, cw - R * 2 - 40), x0 = (W - (R * 2 + 28 + nw)) / 2;
+    c.save(); c.beginPath(); c.arc(x0 + R, cy, R, 0, Math.PI * 2); c.closePath(); c.fillStyle = '#e8dfc4'; c.fill(); c.clip();
+    if (img && anon) c.drawImage(img, x0 + R - R * 0.55, cy - R * 0.71, R * 1.1, R * 1.42);
+    else if (img) { const ar = img.width / img.height; let dw = R * 2, dh = R * 2; if (ar > 1) dw = dh * ar; else dh = dw / ar; c.drawImage(img, x0 + R - dw / 2, cy - dh / 2, dw, dh); }
+    else { c.fillStyle = GREEN; c.font = '800 48px ' + LA; c.textAlign = 'center'; c.fillText((name || '?').charAt(0).toUpperCase(), x0 + R, cy - 26); }
+    c.restore();
+    c.beginPath(); c.arc(x0 + R, cy, R, 0, Math.PI * 2); c.lineWidth = 4; c.strokeStyle = GREEN; c.stroke();
+    c.textAlign = 'left'; c.fillStyle = '#7b8a73'; c.font = '500 26px ' + LA; c.fillText('Ditulis oleh', x0 + R * 2 + 28, cy - 38);
+    c.fillStyle = INK; c.font = '700 38px ' + LA; c.fillText(name, x0 + R * 2 + 28, cy + 2, nw);
+    c.textAlign = 'center'; c.fillStyle = GREEN; c.font = '600 28px ' + LA; c.fillText(location.host, W / 2, H - pad - 40);
+    return cv;
+  }
+
+  async function imageDialog(it) {
+    let fmt = 'story', cv = null;
+    const d = sheet('<div style="font-weight:800;color:' + INK + '">Gambar Daily Faedah</div><div style="display:flex;gap:8px;margin:8px 0"><button data-a="story" style="' + B + ';margin:0">9:16 Story</button><button data-a="square" style="' + B + ';margin:0">1:1 Postingan</button></div><div data-p style="text-align:center;min-height:80px;color:#777;font-size:13px">Membuat gambar…</div><button data-a="shareimg" style="' + BG + '">Bagikan gambar</button><button data-a="save" style="' + B + '">Simpan gambar</button><button data-a="x" style="' + B + ';border-color:#bbb">Tutup</button>');
+    const canFiles = navigator.canShare && navigator.canShare({ files: [new File(['x'], 'a.png', { type: 'image/png' })] });
+    if (!canFiles) d.querySelector('[data-a="shareimg"]').style.display = 'none';
+    const blob = () => new Promise(r => cv.toBlob(r, 'image/png'));
+    const draw = async () => {
+      const p = d.querySelector('[data-p]'); p.textContent = 'Membuat gambar…';
+      cv = await render(it, fmt); cv.style.cssText = 'max-width:100%;max-height:48vh;border-radius:10px;border:1px solid #ddd'; p.textContent = ''; p.appendChild(cv);
+    };
+    d.onclick = async e => {
+      const a = e.target.dataset && e.target.dataset.a;
+      if (e.target === d || a === 'x') return d.remove();
+      if (a === 'story' || a === 'square') { fmt = a; await draw(); }
+      if (a === 'save' && cv) { const b = await blob(), l = document.createElement('a'); l.href = URL.createObjectURL(b); l.download = 'daily-faedah-qowwamoon.png'; document.body.appendChild(l); l.click(); l.remove(); setTimeout(() => URL.revokeObjectURL(l.href), 4000); }
+      if (a === 'shareimg' && cv) { const f = new File([await blob()], 'daily-faedah-qowwamoon.png', { type: 'image/png' }); try { await navigator.share({ files: [f], title: locTitle(it) }); } catch (e2) {} }
+    };
+    await draw();
+  }
+
+  // tombol Bagikan di jendela baca faedah
+  const o = window.openFaedahReaderModal;
+  window.openFaedahReaderModal = function (id) {
+    const it = dailyFaedahList.find(f => f.id === id) || dailyFaedahList[0]; curId = it && it.id;
+    o.apply(this, arguments);
+    if (!$('faedahShareBtn')) {
+      const box = $('faedahModalAuthorBox'); if (!box) return;
+      const b = document.createElement('button'); b.id = 'faedahShareBtn'; b.type = 'button';
+      b.style.cssText = 'width:100%;padding:10px;border-radius:12px;background:' + GREEN + ';color:#fff;font-weight:800;font-size:14px';
+      b.innerHTML = '<i class="fa-solid fa-share-nodes"></i> Bagikan'; b.onclick = () => openFaedahShareMenu();
+      box.insertAdjacentElement('afterend', b);
+    }
+  };
+
+  // link ?faedah=ID: masuk sebagai Tamu (jika belum login) lalu buka faedah
+  window.addEventListener('load', () => {
+    const id = new URLSearchParams(location.search).get('faedah'); if (!id) return;
+    if (!accessMode) enterAsGuest();
+    let n = 0;
+    const tryOpen = () => {
+      if (dailyFaedahList.find(f => f.id === id)) { openFaedahReaderModal(id); history.replaceState(null, '', location.pathname); }
+      else if (n++ < 20) setTimeout(tryOpen, 500);
+      else { toast('Faedah tidak ditemukan.', 'error'); history.replaceState(null, '', location.pathname); }
+    };
+    setTimeout(tryOpen, 300);
+  });
+})();
+</script>
 <!-- ===== SINKRONISASI FIREBASE (QOWSYNC) ===== -->
 <script>
 (function () {
